@@ -99,3 +99,25 @@ def test_crawl_sleeps_between_requests(mock_get, mock_sleep):
     # sleep must be called at least once between the two requests
     assert mock_sleep.call_count >= 1
     mock_sleep.assert_called_with(POLITENESS_DELAY)
+
+
+@patch("crawler.time.sleep")
+@patch("crawler.requests.get")
+def test_crawl_skips_url_queued_twice(mock_get, mock_sleep):
+    # page1 links to page2 AND page3
+    # page2 also links to page3 — so page3 enters the queue twice
+    # before it is visited; the second dequeue must be skipped (line 30)
+    page1 = '<html><body><a href="/page2">p2</a><a href="/page3">p3</a></body></html>'
+    page2 = '<html><body><a href="/page3">p3 again</a></body></html>'
+    page3 = '<html><body><p>Final</p></body></html>'
+    mock_get.side_effect = [
+        mock_response(page1),
+        mock_response(page2),
+        mock_response(page3),
+    ]
+    pages = crawl("http://example.com/")
+    assert len(pages) == 3
+    # page3 must only be fetched once despite being queued twice
+    assert mock_get.call_count == 3
+    # sleep is called between requests, not on the last one
+    assert mock_sleep.call_count == 2
