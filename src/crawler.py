@@ -29,13 +29,17 @@ def crawl(start_url: str) -> dict[str, str]:
         if url in visited:
             continue
 
+        # Sleep before every request except the first, ensuring the
+        # politeness window applies only between actual HTTP requests.
+        if visited:
+            time.sleep(POLITENESS_DELAY)
+
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
         except requests.RequestException as e:
             print(f"  [error] Could not fetch {url}: {e}")
             visited.add(url)
-            time.sleep(POLITENESS_DELAY)
             continue
 
         visited.add(url)
@@ -52,8 +56,5 @@ def crawl(start_url: str) -> dict[str, str]:
                 queue.append(clean)
 
         print(f"  Crawled ({len(pages)}): {url}")
-
-        if queue:
-            time.sleep(POLITENESS_DELAY)
 
     return pages
