@@ -12,4 +12,4 @@ env/
 .coverage
 htmlcov/
 *.json
-!data/.gitkeep
+!data/index.json
