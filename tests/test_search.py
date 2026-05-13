@@ -1,11 +1,15 @@
-"""Tests for the search module."""
+"""Tests for the search module and CLI shell commands."""
 
 import sys
 import os
+import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from unittest.mock import patch
+
 from search import find_pages, print_word, rank_pages
+from main import run_shell
 
 # ---------------------------------------------------------------------------
 # Shared fixture — includes _meta for TF-IDF tests
@@ -157,3 +161,125 @@ def test_rank_pages_scores_are_floats():
     results = rank_pages(INDEX, ["hello"])
     for _, score in results:
         assert isinstance(score, float)
+
+
+# ---------------------------------------------------------------------------
+# CLI shell — run_shell
+# ---------------------------------------------------------------------------
+
+def test_shell_quit_exits_cleanly():
+    with patch("builtins.input", side_effect=["quit"]):
+        run_shell()
+
+
+def test_shell_eof_exits_cleanly():
+    with patch("builtins.input", side_effect=EOFError):
+        run_shell()
+
+
+def test_shell_keyboard_interrupt_exits_cleanly():
+    with patch("builtins.input", side_effect=KeyboardInterrupt):
+        run_shell()
+
+
+def test_shell_empty_lines_ignored(capsys):
+    with patch("builtins.input", side_effect=["", "   ", "quit"]):
+        run_shell()
+    assert "Unknown" not in capsys.readouterr().out
+
+
+def test_shell_unknown_command(capsys):
+    with patch("builtins.input", side_effect=["xyz", "quit"]):
+        run_shell()
+    assert "unknown" in capsys.readouterr().out.lower()
+
+
+def test_shell_help_lists_all_commands(capsys):
+    with patch("builtins.input", side_effect=["help", "quit"]):
+        run_shell()
+    out = capsys.readouterr().out
+    for cmd in ("build", "load", "print", "find", "quit"):
+        assert cmd in out
+
+
+def test_shell_find_without_index(capsys):
+    with patch("builtins.input", side_effect=["find hello", "quit"]):
+        run_shell()
+    assert "no index" in capsys.readouterr().out.lower()
+
+
+def test_shell_print_without_index(capsys):
+    with patch("builtins.input", side_effect=["print hello", "quit"]):
+        run_shell()
+    assert "no index" in capsys.readouterr().out.lower()
+
+
+def test_shell_find_no_args(capsys):
+    with patch("builtins.input", side_effect=["find", "quit"]):
+        run_shell()
+    assert "usage" in capsys.readouterr().out.lower()
+
+
+def test_shell_print_no_args(capsys):
+    with patch("builtins.input", side_effect=["print", "quit"]):
+        run_shell()
+    assert "usage" in capsys.readouterr().out.lower()
+
+
+def test_shell_build_command(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    sample_pages = {"http://example.com/1": "hello world"}
+    with patch("main.crawl", return_value=sample_pages), \
+         patch("main.build_index", return_value=INDEX), \
+         patch("main.INDEX_FILE", str(index_file)), \
+         patch("builtins.input", side_effect=["build", "quit"]):
+        run_shell()
+    assert "saved" in capsys.readouterr().out.lower()
+
+
+def test_shell_load_then_find_returns_results(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(INDEX))
+    with patch("main.INDEX_FILE", str(index_file)), \
+         patch("builtins.input", side_effect=["load", "find hello", "quit"]):
+        run_shell()
+    assert "http://example.com/1" in capsys.readouterr().out
+
+
+def test_shell_load_then_find_ranked_by_score(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(INDEX))
+    with patch("main.INDEX_FILE", str(index_file)), \
+         patch("builtins.input", side_effect=["load", "find hello", "quit"]):
+        run_shell()
+    out = capsys.readouterr().out
+    assert "[" in out and "]" in out
+    assert out.index("example.com/1") < out.index("example.com/2")
+
+
+def test_shell_load_then_find_no_results(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(INDEX))
+    with patch("main.INDEX_FILE", str(index_file)), \
+         patch("builtins.input", side_effect=["load", "find nonexistentword", "quit"]):
+        run_shell()
+    assert "no pages" in capsys.readouterr().out.lower()
+
+
+def test_shell_load_then_print_word(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(INDEX))
+    with patch("main.INDEX_FILE", str(index_file)), \
+         patch("builtins.input", side_effect=["load", "print hello", "quit"]):
+        run_shell()
+    out = capsys.readouterr().out
+    assert "hello" in out
+    assert "http://example.com/1" in out
+
+
+def test_shell_load_command_missing_file(tmp_path, capsys):
+    nonexistent = str(tmp_path / "missing.json")
+    with patch("main.INDEX_FILE", nonexistent), \
+         patch("builtins.input", side_effect=["load", "quit"]):
+        run_shell()
+    assert "No index file found" in capsys.readouterr().out
