@@ -73,9 +73,32 @@ def test_build_index_case_insensitive():
 
 
 def test_build_index_empty_input():
-    assert build_index({}) == {}
+    index = build_index({})
+    assert index["_meta"]["doc_count"] == 0
+    assert index["_meta"]["doc_lengths"] == {}
 
 
 def test_build_index_empty_page_text():
     pages = {"http://example.com/": ""}
-    assert build_index(pages) == {}
+    index = build_index(pages)
+    # No word entries added for empty text
+    assert "http://example.com/" not in index.get("a", {})
+    # But metadata is still recorded
+    assert index["_meta"]["doc_count"] == 1
+    assert index["_meta"]["doc_lengths"]["http://example.com/"] == 0
+
+
+def test_build_index_stores_doc_count():
+    pages = {
+        "http://example.com/1": "hello world",
+        "http://example.com/2": "foo bar",
+    }
+    index = build_index(pages)
+    assert index["_meta"]["doc_count"] == 2
+
+
+def test_build_index_stores_doc_lengths():
+    pages = {"http://example.com/": "hello world hello"}
+    index = build_index(pages)
+    # 3 tokens: "hello", "world", "hello"
+    assert index["_meta"]["doc_lengths"]["http://example.com/"] == 3
