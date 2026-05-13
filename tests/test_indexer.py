@@ -1,11 +1,26 @@
-"""Tests for the indexer module."""
+"""Tests for the indexer module, including build/load pipeline integration."""
 
 import sys
 import os
+import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from unittest.mock import patch
+
 from indexer import tokenise, build_index, STOPWORDS
+from main import cmd_build, cmd_load
+
+# ---------------------------------------------------------------------------
+# Shared data for pipeline tests
+# ---------------------------------------------------------------------------
+
+PIPELINE_INDEX = {
+    "_meta": {"doc_count": 1, "doc_lengths": {"http://example.com/": 3}},
+    "hello": {"http://example.com/": {"frequency": 2, "positions": [0, 2]}},
+    "world": {"http://example.com/": {"frequency": 1, "positions": [1]}},
+}
+PIPELINE_PAGES = {"http://example.com/": "hello world hello"}
 
 # ---------------------------------------------------------------------------
 # tokenise
@@ -143,3 +158,66 @@ def test_build_index_stores_doc_lengths():
     pages = {"http://example.com/": "hello world hello"}
     index = build_index(pages)
     assert index["_meta"]["doc_lengths"]["http://example.com/"] == 3
+
+
+# ---------------------------------------------------------------------------
+# cmd_load
+# ---------------------------------------------------------------------------
+
+def test_cmd_load_missing_file_returns_none(capsys):
+    with patch("main.os.path.exists", return_value=False):
+        result = cmd_load()
+    assert result is None
+    assert "No index file found" in capsys.readouterr().out
+
+
+def test_cmd_load_reads_index_from_file(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(PIPELINE_INDEX))
+    with patch("main.INDEX_FILE", str(index_file)):
+        result = cmd_load()
+    assert result is not None
+    assert "hello" in result
+    assert "loaded" in capsys.readouterr().out.lower()
+
+
+def test_cmd_load_reports_word_count(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(PIPELINE_INDEX))
+    with patch("main.INDEX_FILE", str(index_file)):
+        cmd_load()
+    # PIPELINE_INDEX has _meta + hello + world = 3 keys
+    assert "3" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# cmd_build
+# ---------------------------------------------------------------------------
+
+def test_cmd_build_calls_crawl_and_build_index(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    with patch("main.crawl", return_value=PIPELINE_PAGES) as mock_crawl, \
+         patch("main.build_index", return_value=PIPELINE_INDEX) as mock_build, \
+         patch("main.INDEX_FILE", str(index_file)):
+        result = cmd_build()
+    mock_crawl.assert_called_once()
+    mock_build.assert_called_once_with(PIPELINE_PAGES)
+    assert result == PIPELINE_INDEX
+
+
+def test_cmd_build_saves_index_to_file(tmp_path):
+    index_file = tmp_path / "index.json"
+    with patch("main.crawl", return_value=PIPELINE_PAGES), \
+         patch("main.build_index", return_value=PIPELINE_INDEX), \
+         patch("main.INDEX_FILE", str(index_file)):
+        cmd_build()
+    assert json.loads(index_file.read_text()) == PIPELINE_INDEX
+
+
+def test_cmd_build_prints_confirmation(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    with patch("main.crawl", return_value=PIPELINE_PAGES), \
+         patch("main.build_index", return_value=PIPELINE_INDEX), \
+         patch("main.INDEX_FILE", str(index_file)):
+        cmd_build()
+    assert "saved" in capsys.readouterr().out.lower()
