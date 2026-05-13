@@ -24,7 +24,7 @@ from indexer import build_index
 from search import print_word, rank_pages
 
 TARGET_URL = "https://quotes.toscrape.com/"
-INDEX_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "index.json")
+INDEX_FILE = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "data", "index.json"))
 
 
 def cmd_build() -> dict:
@@ -35,7 +35,8 @@ def cmd_build() -> dict:
     os.makedirs(os.path.dirname(INDEX_FILE), exist_ok=True)
     with open(INDEX_FILE, "w", encoding="utf-8") as fh:
         json.dump(index, fh)
-    print(f"Index saved to {INDEX_FILE}  ({len(index)} unique words).")
+    word_count = len(index) - 1  # exclude _meta key
+    print(f"Index saved to {INDEX_FILE}  ({word_count} unique words).")
     return index
 
 
@@ -45,7 +46,8 @@ def cmd_load() -> dict | None:
         return None
     with open(INDEX_FILE, encoding="utf-8") as fh:
         index = json.load(fh)
-    print(f"Index loaded from {INDEX_FILE}  ({len(index)} unique words).")
+    word_count = len(index) - 1  # exclude _meta key
+    print(f"Index loaded from {INDEX_FILE}  ({word_count} unique words).")
     return index
 
 
@@ -105,5 +107,5 @@ def run_shell() -> None:
             print(f"  Unknown command: '{command}'. Type 'help' for commands.")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     run_shell()

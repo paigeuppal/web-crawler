@@ -3,6 +3,9 @@
 import sys
 import os
 import json
+import time
+import random
+import string
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -186,8 +189,8 @@ def test_cmd_load_reports_word_count(tmp_path, capsys):
     index_file.write_text(json.dumps(PIPELINE_INDEX))
     with patch("main.INDEX_FILE", str(index_file)):
         cmd_load()
-    # PIPELINE_INDEX has _meta + hello + world = 3 keys
-    assert "3" in capsys.readouterr().out
+    # PIPELINE_INDEX has hello + world = 2 real words (_meta excluded from count)
+    assert "2" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -221,3 +224,61 @@ def test_cmd_build_prints_confirmation(tmp_path, capsys):
          patch("main.INDEX_FILE", str(index_file)):
         cmd_build()
     assert "saved" in capsys.readouterr().out.lower()
+
+
+# ---------------------------------------------------------------------------
+# Performance tests — verify O(T) scaling of build_index
+# ---------------------------------------------------------------------------
+
+def _make_pages(num_pages: int, tokens_per_page: int) -> dict[str, str]:
+    """Generate synthetic pages with random alphabetic words."""
+    vocab = ["".join(random.choices(string.ascii_lowercase, k=6)) for _ in range(200)]
+    pages = {}
+    for i in range(num_pages):
+        text = " ".join(random.choices(vocab, k=tokens_per_page))
+        pages[f"http://example.com/page{i}"] = text
+    return pages
+
+
+def test_build_index_completes_in_reasonable_time():
+    """build_index on 1 000 pages × 500 tokens should finish well under 5s."""
+    pages = _make_pages(num_pages=1_000, tokens_per_page=500)
+    start = time.perf_counter()
+    build_index(pages)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 5.0, f"build_index took {elapsed:.2f}s — too slow"
+
+
+def test_build_index_scales_linearly(capsys):
+    """Doubling total tokens should roughly double build time (O(T) scaling).
+
+    Prints a simple ASCII chart to stdout for visual inspection during
+    the video demonstration.
+    """
+    sizes = [10_000, 20_000, 40_000, 80_000]
+    times = []
+
+    for total_tokens in sizes:
+        pages = _make_pages(num_pages=100, tokens_per_page=total_tokens // 100)
+        start = time.perf_counter()
+        build_index(pages)
+        times.append(time.perf_counter() - start)
+
+    # Print ASCII bar chart
+    print("\n  build_index scaling (O(T) verification)")
+    print("  " + "─" * 44)
+    max_t = max(times)
+    for tokens, t in zip(sizes, times):
+        bar = "█" * int(30 * t / max_t)
+        print(f"  {tokens:>6} tokens │ {bar:<30} {t:.3f}s")
+    print()
+
+    # Each doubling of tokens should take no more than 4× as long.
+    # 4× (not 2×) accounts for micro-benchmark noise and Python allocator
+    # variance; anything above 4× would indicate clearly super-linear growth.
+    for i in range(1, len(times)):
+        ratio = times[i] / times[i - 1]
+        assert ratio < 4.0, (
+            f"build_index appears super-linear: doubling tokens "
+            f"increased time by {ratio:.1f}×"
+        )
