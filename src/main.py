@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from crawler import crawl
 from indexer import build_index
-from search import find_pages, print_word
+from search import print_word, rank_pages
 
 TARGET_URL = "https://quotes.toscrape.com/"
 INDEX_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "index.json")
@@ -73,7 +73,7 @@ def run_shell() -> None:
                 "  load               – load index from disk\n"
                 "  print <word>       – print index entry for a word\n"
                 "  find <word> [...]  – find pages containing all words\n"
-                "  quit               – exit\n"
+                "  quit               - exit\n"
             )
         elif command == "quit":
             break
@@ -94,11 +94,11 @@ def run_shell() -> None:
             elif index is None:
                 print("No index loaded. Run 'build' or 'load' first.")
             else:
-                results = find_pages(index, args)
+                results = rank_pages(index, args)
                 if results:
-                    print(f"  Found {len(results)} page(s):")
-                    for url in results:
-                        print(f"    {url}")
+                    print(f"  Found {len(results)} page(s) (ranked by relevance):")
+                    for url, score in results:
+                        print(f"    [{score:.4f}]  {url}")
                 else:
                     print("  No pages found.")
         else:
