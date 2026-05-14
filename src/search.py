@@ -1,7 +1,7 @@
 """Search operations against the inverted index.
 
-Provides the logic for the 'print' and 'find' shell commands, including
-TF-IDF ranked retrieval for multi-term queries.
+Provides the logic for the 'print', 'find', and 'stats' shell commands,
+including TF-IDF ranked retrieval for multi-term queries.
 
 TF-IDF formula used:
     TF(term, doc)  = frequency(term, doc) / doc_length(doc)
@@ -92,3 +92,44 @@ def rank_pages(index: dict, query_words: list[str]) -> list[tuple[str, float]]:
 
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored
+
+
+def get_stats(index: dict) -> dict:
+    """Compute summary statistics from the inverted index.
+
+    Returns a dict with:
+        doc_count   – number of pages indexed
+        word_count  – number of unique non-stopword words
+        total_tokens – sum of all page token counts (including stopwords)
+        avg_tokens  – average tokens per page
+        top_words   – list of (word, doc_frequency) sorted by df descending
+        longest     – (url, token_count) for the longest page
+        shortest    – (url, token_count) for the shortest page
+    """
+    meta = index.get("_meta", {})
+    doc_count = meta.get("doc_count", 0)
+    doc_lengths: dict[str, int] = meta.get("doc_lengths", {})
+
+    words = [k for k in index if k != "_meta"]
+    word_count = len(words)
+    total_tokens = sum(doc_lengths.values())
+    avg_tokens = total_tokens / doc_count if doc_count else 0.0
+
+    top_words = sorted(
+        ((word, len(index[word])) for word in words),
+        key=lambda x: x[1],
+        reverse=True,
+    )[:10]
+
+    longest = max(doc_lengths.items(), key=lambda x: x[1]) if doc_lengths else None
+    shortest = min(doc_lengths.items(), key=lambda x: x[1]) if doc_lengths else None
+
+    return {
+        "doc_count": doc_count,
+        "word_count": word_count,
+        "total_tokens": total_tokens,
+        "avg_tokens": avg_tokens,
+        "top_words": top_words,
+        "longest": longest,
+        "shortest": shortest,
+    }

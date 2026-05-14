@@ -8,6 +8,7 @@ Supported commands:
     load           Load a previously saved index from disk.
     print <word>   Print the index entry for a word.
     find <w> ...   List all pages containing every supplied word.
+    stats          Show index statistics.
     help           Show available commands.
     quit           Exit the shell.
 """
@@ -20,11 +21,13 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from crawler import crawl
-from indexer import build_index
-from search import print_word, rank_pages
+from indexer import build_index, STOPWORDS
+from search import get_stats, print_word, rank_pages
 
 TARGET_URL = "https://quotes.toscrape.com/"
-INDEX_FILE = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "data", "index.json"))
+INDEX_FILE = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "data", "index.json")
+)
 
 
 def cmd_build() -> dict:
@@ -36,7 +39,7 @@ def cmd_build() -> dict:
     with open(INDEX_FILE, "w", encoding="utf-8") as fh:
         json.dump(index, fh)
     word_count = len(index) - 1  # exclude _meta key
-    print(f"Index saved to {INDEX_FILE}  ({word_count} unique words).")
+    print(f"Index saved to {INDEX_FILE}  ({word_count:,} unique words).")
     return index
 
 
@@ -47,8 +50,30 @@ def cmd_load() -> dict | None:
     with open(INDEX_FILE, encoding="utf-8") as fh:
         index = json.load(fh)
     word_count = len(index) - 1  # exclude _meta key
-    print(f"Index loaded from {INDEX_FILE}  ({word_count} unique words).")
+    print(f"Index loaded from {INDEX_FILE}  ({word_count:,} unique words).")
     return index
+
+
+def cmd_stats(index: dict) -> None:
+    """Print a summary of index statistics to stdout."""
+    s = get_stats(index)
+    sep = "─" * 48
+    print(f"\n  Index Statistics")
+    print(f"  {sep}")
+    print(f"  Pages indexed    : {s['doc_count']:>6,}")
+    print(f"  Unique words     : {s['word_count']:>6,}")
+    print(f"  Total tokens     : {s['total_tokens']:>6,}")
+    print(f"  Avg words / page : {s['avg_tokens']:>6.0f}")
+    print(f"\n  Top 10 words by page coverage:")
+    for word, df in s["top_words"]:
+        print(f"    {word:<18} → {df:,} page(s)")
+    if s["longest"]:
+        url, length = s["longest"]
+        print(f"\n  Longest page  ({length:,} tokens) : {url}")
+    if s["shortest"]:
+        url, length = s["shortest"]
+        print(f"  Shortest page  ({length:,} tokens) : {url}")
+    print()
 
 
 def run_shell() -> None:
@@ -75,7 +100,8 @@ def run_shell() -> None:
                 "  load               – load index from disk\n"
                 "  print <word>       – print index entry for a word\n"
                 "  find <word> [...]  – find pages containing all words\n"
-                "  quit               - exit\n"
+                "  stats              – show index statistics\n"
+                "  quit               – exit\n"
             )
         elif command == "quit":
             break
@@ -83,6 +109,11 @@ def run_shell() -> None:
             index = cmd_build()
         elif command == "load":
             index = cmd_load()
+        elif command == "stats":
+            if index is None:
+                print("No index loaded. Run 'build' or 'load' first.")
+            else:
+                cmd_stats(index)
         elif command == "print":
             if not args:
                 print("Usage: print <word>")
@@ -96,13 +127,25 @@ def run_shell() -> None:
             elif index is None:
                 print("No index loaded. Run 'build' or 'load' first.")
             else:
-                results = rank_pages(index, args)
-                if results:
-                    print(f"  Found {len(results)} page(s) (ranked by relevance):")
-                    for url, score in results:
-                        print(f"    [{score:.4f}]  {url}")
+                words = [w.lower() for w in args]
+                sw_hit = [w for w in words if w in STOPWORDS]
+                search_words = [w for w in words if w not in STOPWORDS]
+
+                if sw_hit:
+                    listed = ", ".join(f"'{w}'" for w in sw_hit)
+                    label = "is a stopword" if len(sw_hit) == 1 else "are stopwords"
+                    print(f"  Note: {listed} {label} excluded from the index.")
+
+                if not search_words:
+                    print("  No searchable words in query.")
                 else:
-                    print("  No pages found.")
+                    results = rank_pages(index, search_words)
+                    if results:
+                        print(f"  Found {len(results)} page(s) (ranked by relevance):")
+                        for url, score in results:
+                            print(f"    [{score:.4f}]  {url}")
+                    else:
+                        print("  No pages found.")
         else:
             print(f"  Unknown command: '{command}'. Type 'help' for commands.")
 
