@@ -119,5 +119,7 @@ def test_crawl_skips_url_queued_twice(mock_get, mock_sleep):
     assert len(pages) == 3
     # page3 must only be fetched once despite being queued twice
     assert mock_get.call_count == 3
-    # 3 sleeps: queue is non-empty after each of the 3 real fetches
-    assert mock_sleep.call_count == 3
+    # exactly 2 sleeps: before page2 and before page3 (first copy)
+    # page1 has no sleep (visited is empty), second page3 copy hits
+    # the `if url in visited: continue` before the sleep is reached
+    assert mock_sleep.call_count == 2
