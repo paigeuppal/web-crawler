@@ -51,7 +51,7 @@ def crawl(start_url: str) -> dict[str, str]:
             if parsed.netloc == base_domain and clean not in visited:
                 queue.append(clean)
 
-        print(f"  Crawled ({len(pages)}, queue: {len(queue)}): {url}")
+        print(f"  Crawled ({len(pages)}, discovered: {len(pages) + len(queue)}): {url}")
 
         if queue:
             time.sleep(POLITENESS_DELAY)

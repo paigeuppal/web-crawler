@@ -199,9 +199,11 @@ def test_cmd_load_reports_word_count(tmp_path, capsys):
 
 def test_cmd_build_calls_crawl_and_build_index(tmp_path, capsys):
     index_file = tmp_path / "index.json"
+    pages_file = tmp_path / "pages.json"
     with patch("main.crawl", return_value=PIPELINE_PAGES) as mock_crawl, \
          patch("main.build_index", return_value=PIPELINE_INDEX) as mock_build, \
-         patch("main.INDEX_FILE", str(index_file)):
+         patch("main.INDEX_FILE", str(index_file)), \
+         patch("main.PAGES_FILE", str(pages_file)):
         result = cmd_build()
     mock_crawl.assert_called_once()
     mock_build.assert_called_once_with(PIPELINE_PAGES)
@@ -210,18 +212,33 @@ def test_cmd_build_calls_crawl_and_build_index(tmp_path, capsys):
 
 def test_cmd_build_saves_index_to_file(tmp_path):
     index_file = tmp_path / "index.json"
+    pages_file = tmp_path / "pages.json"
     with patch("main.crawl", return_value=PIPELINE_PAGES), \
          patch("main.build_index", return_value=PIPELINE_INDEX), \
-         patch("main.INDEX_FILE", str(index_file)):
+         patch("main.INDEX_FILE", str(index_file)), \
+         patch("main.PAGES_FILE", str(pages_file)):
         cmd_build()
     assert json.loads(index_file.read_text()) == PIPELINE_INDEX
 
 
-def test_cmd_build_prints_confirmation(tmp_path, capsys):
+def test_cmd_build_saves_pages_to_file(tmp_path):
     index_file = tmp_path / "index.json"
+    pages_file = tmp_path / "pages.json"
     with patch("main.crawl", return_value=PIPELINE_PAGES), \
          patch("main.build_index", return_value=PIPELINE_INDEX), \
-         patch("main.INDEX_FILE", str(index_file)):
+         patch("main.INDEX_FILE", str(index_file)), \
+         patch("main.PAGES_FILE", str(pages_file)):
+        cmd_build()
+    assert json.loads(pages_file.read_text()) == PIPELINE_PAGES
+
+
+def test_cmd_build_prints_confirmation(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    pages_file = tmp_path / "pages.json"
+    with patch("main.crawl", return_value=PIPELINE_PAGES), \
+         patch("main.build_index", return_value=PIPELINE_INDEX), \
+         patch("main.INDEX_FILE", str(index_file)), \
+         patch("main.PAGES_FILE", str(pages_file)):
         cmd_build()
     assert "saved" in capsys.readouterr().out.lower()
 
