@@ -1,7 +1,7 @@
 """Search operations against the inverted index.
 
 Provides the logic for the 'print', 'find', and 'stats' shell commands,
-including TF-IDF ranked retrieval for multi-term queries.
+including TF-IDF ranked retrieval, query suggestions, and snippet extraction.
 
 TF-IDF formula used:
     TF(term, doc)  = frequency(term, doc) / doc_length(doc)
@@ -13,6 +13,7 @@ every document contains the term.
 """
 
 import math
+import re
 
 
 def print_word(index: dict, word: str) -> None:
@@ -98,13 +99,13 @@ def get_stats(index: dict) -> dict:
     """Compute summary statistics from the inverted index.
 
     Returns a dict with:
-        doc_count   – number of pages indexed
-        word_count  – number of unique non-stopword words
+        doc_count    – number of pages indexed
+        word_count   – number of unique non-stopword words
         total_tokens – sum of all page token counts (including stopwords)
-        avg_tokens  – average tokens per page
-        top_words   – list of (word, doc_frequency) sorted by df descending
-        longest     – (url, token_count) for the longest page
-        shortest    – (url, token_count) for the shortest page
+        avg_tokens   – average tokens per page
+        top_words    – list of (word, doc_frequency) sorted by df descending
+        longest      – (url, token_count) for the longest page
+        shortest     – (url, token_count) for the shortest page
     """
     meta = index.get("_meta", {})
     doc_count = meta.get("doc_count", 0)
@@ -133,3 +134,118 @@ def get_stats(index: dict) -> dict:
         "longest": longest,
         "shortest": shortest,
     }
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Compute the Levenshtein edit distance between strings a and b.
+
+    Returns early with 3 if the length difference exceeds 2, avoiding
+    unnecessary computation for clearly dissimilar words.
+    """
+    if abs(len(a) - len(b)) > 2:
+        return 3
+    m, n = len(a), len(b)
+    prev = list(range(n + 1))
+    for i in range(1, m + 1):
+        curr = [i] + [0] * n
+        for j in range(1, n + 1):
+            if a[i - 1] == b[j - 1]:
+                curr[j] = prev[j - 1]
+            else:
+                curr[j] = 1 + min(prev[j - 1], prev[j], curr[j - 1])
+        prev = curr
+    return prev[n]
+
+
+def suggest(index: dict, word: str, max_results: int = 5) -> list[str]:
+    """Return index words similar to word, for use as query suggestions.
+
+    Strategy:
+        1. Prefix match — find words starting with the first 4 chars of word.
+           Fast O(W) scan; handles completions (e.g. 'indif' → 'indifference').
+        2. Edit distance fallback — if no prefix matches, find words within
+           Levenshtein distance ≤ 2. Handles typos (e.g. 'helo' → 'hello').
+
+    Words shorter than 2 characters are ignored as too ambiguous.
+    """
+    word = word.lower().strip()
+    if len(word) < 2:
+        return []
+
+    candidates = [k for k in index if k != "_meta"]
+    prefix = word[:min(4, len(word))]
+    prefix_matches = sorted(
+        [w for w in candidates if w.startswith(prefix) and w != word],
+        key=len,
+    )
+    if prefix_matches:
+        return prefix_matches[:max_results]
+
+    close = [
+        (w, _edit_distance(word, w))
+        for w in candidates
+        if w != word and _edit_distance(word, w) <= 2
+    ]
+    close.sort(key=lambda x: x[1])
+    return [w for w, _ in close[:max_results]]
+
+
+def best_snippet_position(
+    index: dict, words: list[str], url: str, context: int = 5
+) -> int:
+    """Find the token position that maximises query word coverage in a snippet.
+
+    Collects every (position, word) pair for the given URL across all query
+    words, then slides a window of width context*2+1 tokens to find the
+    anchor position where the most distinct query words fall within the window.
+
+    This means multi-word queries like 'love life' will show a snippet where
+    both words appear together whenever possible, rather than always anchoring
+    on the first word's first occurrence.
+
+    Falls back to position 0 if no position data is available.
+    """
+    all_positions: list[tuple[int, str]] = []
+    for word in words:
+        if word in index and url in index[word]:
+            for pos in index[word][url]["positions"]:
+                all_positions.append((pos, word))
+
+    if not all_positions:
+        return 0
+
+    all_positions.sort()
+    best_pos = all_positions[0][0]
+    best_coverage = 0
+
+    for anchor, _ in all_positions:
+        words_in_window = {
+            w for p, w in all_positions
+            if anchor - context <= p <= anchor + context
+        }
+        if len(words_in_window) > best_coverage:
+            best_coverage = len(words_in_window)
+            best_pos = anchor
+
+    return best_pos
+
+
+def extract_snippet(page_text: str, position: int, context: int = 5) -> str:
+    """Extract a readable text snippet around the token at position.
+
+    Uses the full token stream (including stopwords) so the snippet reads
+    as natural prose. Surrounding ellipses indicate truncation.
+
+    Args:
+        page_text: The plain-text content of the page.
+        position:  Token index of the target word in the full token stream.
+        context:   Number of tokens to include on each side of the target.
+    """
+    tokens = re.findall(r"[a-z]+", page_text.lower())
+    if not tokens or position >= len(tokens):
+        return ""
+    start = max(0, position - context)
+    end = min(len(tokens), position + context + 1)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(tokens) else ""
+    return f"{prefix}{' '.join(tokens[start:end])}{suffix}"
