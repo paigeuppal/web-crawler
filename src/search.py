@@ -190,6 +190,46 @@ def suggest(index: dict, word: str, max_results: int = 5) -> list[str]:
     return [w for w, _ in close[:max_results]]
 
 
+def best_snippet_position(
+    index: dict, words: list[str], url: str, context: int = 5
+) -> int:
+    """Find the token position that maximises query word coverage in a snippet.
+
+    Collects every (position, word) pair for the given URL across all query
+    words, then slides a window of width context*2+1 tokens to find the
+    anchor position where the most distinct query words fall within the window.
+
+    This means multi-word queries like 'love life' will show a snippet where
+    both words appear together whenever possible, rather than always anchoring
+    on the first word's first occurrence.
+
+    Falls back to position 0 if no position data is available.
+    """
+    all_positions: list[tuple[int, str]] = []
+    for word in words:
+        if word in index and url in index[word]:
+            for pos in index[word][url]["positions"]:
+                all_positions.append((pos, word))
+
+    if not all_positions:
+        return 0
+
+    all_positions.sort()
+    best_pos = all_positions[0][0]
+    best_coverage = 0
+
+    for anchor, _ in all_positions:
+        words_in_window = {
+            w for p, w in all_positions
+            if anchor - context <= p <= anchor + context
+        }
+        if len(words_in_window) > best_coverage:
+            best_coverage = len(words_in_window)
+            best_pos = anchor
+
+    return best_pos
+
+
 def extract_snippet(page_text: str, position: int, context: int = 5) -> str:
     """Extract a readable text snippet around the token at position.
 

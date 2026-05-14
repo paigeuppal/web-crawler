@@ -23,7 +23,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from crawler import crawl
 from indexer import build_index, STOPWORDS
-from search import extract_snippet, get_stats, print_word, rank_pages, suggest
+from search import (
+    best_snippet_position, extract_snippet,
+    get_stats, print_word, rank_pages, suggest,
+)
 
 TARGET_URL = "https://quotes.toscrape.com/"
 INDEX_FILE = os.path.normpath(
@@ -176,7 +179,7 @@ def run_shell() -> None:
                         for url, score in results:
                             print(f"    [{score:.4f}]  {url}")
                             if pages and url in pages:
-                                pos = index[valid_words[0]][url]["positions"][0]
+                                pos = best_snippet_position(index, valid_words, url)
                                 snippet = extract_snippet(pages[url], pos)
                                 print(f"             \"{snippet}\"")
                     else:
