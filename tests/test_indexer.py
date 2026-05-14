@@ -1,11 +1,29 @@
-"""Tests for the indexer module."""
+"""Tests for the indexer module, including build/load pipeline integration."""
 
 import sys
 import os
+import json
+import time
+import random
+import string
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from unittest.mock import patch
+
 from indexer import tokenise, build_index, STOPWORDS
+from main import cmd_build, cmd_load
+
+# ---------------------------------------------------------------------------
+# Shared data for pipeline tests
+# ---------------------------------------------------------------------------
+
+PIPELINE_INDEX = {
+    "_meta": {"doc_count": 1, "doc_lengths": {"http://example.com/": 3}},
+    "hello": {"http://example.com/": {"frequency": 2, "positions": [0, 2]}},
+    "world": {"http://example.com/": {"frequency": 1, "positions": [1]}},
+}
+PIPELINE_PAGES = {"http://example.com/": "hello world hello"}
 
 # ---------------------------------------------------------------------------
 # tokenise
@@ -143,3 +161,124 @@ def test_build_index_stores_doc_lengths():
     pages = {"http://example.com/": "hello world hello"}
     index = build_index(pages)
     assert index["_meta"]["doc_lengths"]["http://example.com/"] == 3
+
+
+# ---------------------------------------------------------------------------
+# cmd_load
+# ---------------------------------------------------------------------------
+
+def test_cmd_load_missing_file_returns_none(capsys):
+    with patch("main.os.path.exists", return_value=False):
+        result = cmd_load()
+    assert result is None
+    assert "No index file found" in capsys.readouterr().out
+
+
+def test_cmd_load_reads_index_from_file(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(PIPELINE_INDEX))
+    with patch("main.INDEX_FILE", str(index_file)):
+        result = cmd_load()
+    assert result is not None
+    assert "hello" in result
+    assert "loaded" in capsys.readouterr().out.lower()
+
+
+def test_cmd_load_reports_word_count(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(PIPELINE_INDEX))
+    with patch("main.INDEX_FILE", str(index_file)):
+        cmd_load()
+    # PIPELINE_INDEX has hello + world = 2 real words (_meta excluded from count)
+    assert "2" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# cmd_build
+# ---------------------------------------------------------------------------
+
+def test_cmd_build_calls_crawl_and_build_index(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    with patch("main.crawl", return_value=PIPELINE_PAGES) as mock_crawl, \
+         patch("main.build_index", return_value=PIPELINE_INDEX) as mock_build, \
+         patch("main.INDEX_FILE", str(index_file)):
+        result = cmd_build()
+    mock_crawl.assert_called_once()
+    mock_build.assert_called_once_with(PIPELINE_PAGES)
+    assert result == PIPELINE_INDEX
+
+
+def test_cmd_build_saves_index_to_file(tmp_path):
+    index_file = tmp_path / "index.json"
+    with patch("main.crawl", return_value=PIPELINE_PAGES), \
+         patch("main.build_index", return_value=PIPELINE_INDEX), \
+         patch("main.INDEX_FILE", str(index_file)):
+        cmd_build()
+    assert json.loads(index_file.read_text()) == PIPELINE_INDEX
+
+
+def test_cmd_build_prints_confirmation(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    with patch("main.crawl", return_value=PIPELINE_PAGES), \
+         patch("main.build_index", return_value=PIPELINE_INDEX), \
+         patch("main.INDEX_FILE", str(index_file)):
+        cmd_build()
+    assert "saved" in capsys.readouterr().out.lower()
+
+
+# ---------------------------------------------------------------------------
+# Performance tests — verify O(T) scaling of build_index
+# ---------------------------------------------------------------------------
+
+def _make_pages(num_pages: int, tokens_per_page: int) -> dict[str, str]:
+    """Generate synthetic pages with random alphabetic words."""
+    vocab = ["".join(random.choices(string.ascii_lowercase, k=6)) for _ in range(200)]
+    pages = {}
+    for i in range(num_pages):
+        text = " ".join(random.choices(vocab, k=tokens_per_page))
+        pages[f"http://example.com/page{i}"] = text
+    return pages
+
+
+def test_build_index_completes_in_reasonable_time():
+    """build_index on 1 000 pages × 500 tokens should finish well under 5s."""
+    pages = _make_pages(num_pages=1_000, tokens_per_page=500)
+    start = time.perf_counter()
+    build_index(pages)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 5.0, f"build_index took {elapsed:.2f}s — too slow"
+
+
+def test_build_index_scales_linearly(capsys):
+    """Doubling total tokens should roughly double build time (O(T) scaling).
+
+    Prints a simple ASCII chart to stdout for visual inspection during
+    the video demonstration.
+    """
+    sizes = [10_000, 20_000, 40_000, 80_000]
+    times = []
+
+    for total_tokens in sizes:
+        pages = _make_pages(num_pages=100, tokens_per_page=total_tokens // 100)
+        start = time.perf_counter()
+        build_index(pages)
+        times.append(time.perf_counter() - start)
+
+    # Print ASCII bar chart
+    print("\n  build_index scaling (O(T) verification)")
+    print("  " + "─" * 44)
+    max_t = max(times)
+    for tokens, t in zip(sizes, times):
+        bar = "█" * int(30 * t / max_t)
+        print(f"  {tokens:>6} tokens │ {bar:<30} {t:.3f}s")
+    print()
+
+    # Each doubling of tokens should take no more than 4× as long.
+    # 4× (not 2×) accounts for micro-benchmark noise and Python allocator
+    # variance; anything above 4× would indicate clearly super-linear growth.
+    for i in range(1, len(times)):
+        ratio = times[i] / times[i - 1]
+        assert ratio < 4.0, (
+            f"build_index appears super-linear: doubling tokens "
+            f"increased time by {ratio:.1f}×"
+        )

@@ -10,4 +10,4 @@ venv/
 env/
 .env
 *.json
-!data/.gitkeep
+!data/index.json
