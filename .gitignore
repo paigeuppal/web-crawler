@@ -11,3 +11,4 @@ env/
 .env
 *.json
 !data/index.json
+.coverage
