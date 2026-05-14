@@ -1,4 +1,4 @@
-"""Search Engine Shell — entry point.
+"""Search Engine Shell - entry point.
 
 Run from the repository root:
     python src/main.py

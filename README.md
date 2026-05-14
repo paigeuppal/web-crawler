@@ -1,4 +1,4 @@
-# Web Crawler & Search Engine — COMP3011 Coursework 2
+# Web Crawler & Search Engine - COMP3011 Coursework 2
 
 A command-line search engine that crawls [quotes.toscrape.com](https://quotes.toscrape.com/), builds a TF-IDF inverted index, and provides ranked keyword search with stopword filtering and query suggestions.
 
@@ -83,7 +83,7 @@ The system is composed of four independent modules that form a pipeline:
 
 ## Data Structures & Design Rationale
 
-### Inverted Index — nested dict
+### Inverted Index - nested dict
 
 ```python
 {
@@ -99,24 +99,24 @@ The system is composed of four independent modules that form a pipeline:
 ```
 
 A nested `dict` was chosen over a flat list or database for three reasons:
-- **O(1) word lookup** — Python dicts are hash maps; looking up a word costs constant time regardless of index size.
-- **O(1) per-page lookup** — the inner dict maps URL → stats, so checking whether a page contains a word is also O(1).
-- **Direct JSON serialisation** — the structure maps directly to JSON without any transformation, making `build` and `load` trivial.
+- **O(1) word lookup** - Python dicts are hash maps; looking up a word costs constant time regardless of index size.
+- **O(1) per-page lookup** - the inner dict maps URL → stats, so checking whether a page contains a word is also O(1).
+- **Direct JSON serialisation** - the structure maps directly to JSON without any transformation, making `build` and `load` trivial.
 
 An alternative would be a sorted list of `(word, url, freq)` tuples, but this gives O(log n) lookup and makes intersection more complex.
 
-### Stopwords — `frozenset`
+### Stopwords - `frozenset`
 
 ```python
 STOPWORDS: frozenset[str] = frozenset({"the", "a", "is", ...})
 ```
 
 `frozenset` was chosen over `list` or `set` because:
-- **O(1) membership test** — `word in STOPWORDS` is a hash lookup, not a linear scan.
-- **Immutable** — signals clearly that the stopword list is a constant, not something to be modified at runtime.
+- **O(1) membership test** - `word in STOPWORDS` is a hash lookup, not a linear scan.
+- **Immutable** - signals clearly that the stopword list is a constant, not something to be modified at runtime.
 - A `list` would give O(n) lookup, adding ~70 comparisons per token during indexing.
 
-### BFS Queue — `list` used as a deque
+### BFS Queue - `list` used as a deque
 
 The crawler uses a `list` as a FIFO queue (`pop(0)`). For very large crawls this is O(n) per dequeue. A production system would use `collections.deque` which gives O(1) at both ends. For the scale of this project (~300 pages) the difference is negligible, but this is a known trade-off.
 
@@ -124,19 +124,19 @@ The crawler uses a `list` as a FIFO queue (`pop(0)`). For very large crawls this
 
 ## Algorithms & Complexity Analysis
 
-### Crawling — O(P)
+### Crawling - O(P)
 
 Where P = number of pages on the domain. Each page is visited exactly once (enforced by the `visited` set). URL deduplication via the set costs O(1) per lookup. Total time is dominated by network I/O and the politeness delay: `P × 6 seconds`.
 
-### Index Building — O(T)
+### Index Building - O(T)
 
 Where T = total number of tokens across all pages. Each token is processed once: lowercased, checked against `STOPWORDS` (O(1)), and inserted into the index (two O(1) dict writes). Total: O(T).
 
-### Search (find_pages) — O(W × D)
+### Search (find_pages) - O(W × D)
 
 Where W = number of query words, D = average number of pages per word's posting list. The algorithm intersects posting lists using Python set intersection (`&=`), which runs in O(min(|A|, |B|)) per pair. For W query words this is O(W × D).
 
-### TF-IDF Ranking — O(C × W)
+### TF-IDF Ranking - O(C × W)
 
 Where C = number of candidate URLs after intersection, W = number of query words. Each candidate is scored by iterating over query words and performing O(1) dict lookups. Sorting C results is O(C log C), but C is always small in practice.
 
@@ -285,10 +285,10 @@ pytest tests/test_crawler.py -v
 
 ### Testing strategy
 
-- **Unit tests** — each function tested in isolation with mocked dependencies (network calls, file I/O)
-- **Integration tests** — `cmd_build` and `cmd_load` tested end-to-end through the pipeline using `tmp_path`
-- **Edge case tests** — empty queries, whitespace-only input, missing index file, network errors, duplicate URLs
-- **Performance tests** — `build_index` benchmarked against large synthetic datasets to verify O(T) scaling
+- **Unit tests** - each function tested in isolation with mocked dependencies (network calls, file I/O)
+- **Integration tests** - `cmd_build` and `cmd_load` tested end-to-end through the pipeline using `tmp_path`
+- **Edge case tests** - empty queries, whitespace-only input, missing index file, network errors, duplicate URLs
+- **Performance tests** - `build_index` benchmarked against large synthetic datasets to verify O(T) scaling
 
 ---
 
